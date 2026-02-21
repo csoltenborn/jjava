@@ -122,6 +122,10 @@ public class JavaKernel extends BaseKernel {
             return formatIncompleteSourceException((IncompleteSourceException) e);
         } else if (e instanceof EvalException) {
             return formatEvalException((EvalException) e);
+        } else if (e instanceof RuntimeException && e.getCause() instanceof EvalException) {
+            // CodeEvaluator.evalSingle wraps EvalException in a RuntimeException;
+            // unwrap it so students see only their own exception, not kernel internals.
+            return formatEvalException((EvalException) e.getCause());
         } else if (e instanceof UnresolvedReferenceException) {
             return formatUnresolvedReferenceException(((UnresolvedReferenceException) e));
         } else if (e instanceof EvaluationTimeoutException) {
@@ -180,15 +184,37 @@ public class JavaKernel extends BaseKernel {
 
     private List<String> formatEvalException(EvalException e) {
         List<String> fmt = new ArrayList<>();
-
-
-        String evalExceptionClassName = EvalException.class.getName();
-        String actualExceptionName = e.getExceptionClassName();
-        super.formatError(e).stream()
-                .map(line -> line.replace(evalExceptionClassName, actualExceptionName))
-                .forEach(fmt::add);
-
+        fmt.add(this.errorStyler.secondary("---------------------------------------------------------------------------"));
+        appendEvalExceptionLines(e, fmt, "");
         return fmt;
+    }
+
+    /**
+     * Appends human-readable lines for an {@link EvalException} (and its cause chain) to {@code fmt}.
+     * Uses {@link EvalException#getExceptionClassName()} to show the real exception class name instead
+     * of the JShell wrapper class. Recurses through {@code getCause()} chains.
+     */
+    private void appendEvalExceptionLines(EvalException e, List<String> fmt, String prefix) {
+        String exceptionName = e.getExceptionClassName();
+        String msg = e.getMessage();
+        fmt.add(this.errorStyler.secondary(prefix + exceptionName + (msg != null ? ": " + msg : "")));
+
+        for (StackTraceElement frame : e.getStackTrace()) {
+            fmt.add(this.errorStyler.secondary("    at " + frame));
+        }
+
+        Throwable cause = e.getCause();
+        if (cause instanceof EvalException) {
+            appendEvalExceptionLines((EvalException) cause, fmt, "Caused by: ");
+        } else if (cause != null) {
+            String causeName = cause.getClass().getName();
+            String causeMsg = cause.getMessage();
+            fmt.add(this.errorStyler.secondary("Caused by: " + causeName
+                    + (causeMsg != null ? ": " + causeMsg : "")));
+            for (StackTraceElement frame : cause.getStackTrace()) {
+                fmt.add(this.errorStyler.secondary("    at " + frame));
+            }
+        }
     }
 
     private List<String> formatUnresolvedReferenceException(UnresolvedReferenceException e) {

@@ -1,0 +1,11 @@
+{
+    // vmArgs mirrors the <argLine> in jjava-kernel/pom.xml (surefire config).
+    // Both must be kept in sync: pom.xml controls 'mvn test', this controls the VS Code test runner.
+    "java.test.config": {
+        "vmArgs": [
+            "--add-opens",
+            "jdk.jshell/jdk.jshell=ALL-UNNAMED"
+        ]
+    },
+    "java.configuration.updateBuildConfiguration": "interactive"
+}

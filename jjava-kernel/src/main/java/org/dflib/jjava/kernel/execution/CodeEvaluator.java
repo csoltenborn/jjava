@@ -6,11 +6,17 @@ import jdk.jshell.JShellException;
 import jdk.jshell.Snippet;
 import jdk.jshell.SnippetEvent;
 import jdk.jshell.SourceCodeAnalysis;
+import jdk.jshell.spi.ExecutionControl;
+import jdk.jshell.spi.ExecutionControlProvider;
+import jdk.jshell.spi.ExecutionEnv;
 import org.dflib.jjava.jupyter.kernel.BaseKernel;
+import org.dflib.jjava.jupyter.telemetry.TelemetryCollector;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -19,6 +25,7 @@ public class CodeEvaluator {
     private static final Pattern LAST_LINE = Pattern.compile("(?:^|\r?\n)(?<last>.*)$");
 
     private static final String NO_MAGIC_RETURN = "\"__NO_MAGIC_RETURN\"";
+    private static final String INDENTATION = "  ";
 
     private static final Method SNIPPET_CLASS_NAME_METHOD;
 
@@ -31,36 +38,57 @@ public class CodeEvaluator {
         }
     }
 
-    private static final String INDENTATION = "  ";
+    private final String name;
+    private final long timeoutDuration;
+    private final TimeUnit timeoutUnit;
+    private final JJavaLoaderDelegate loaderDelegate;
+    private final JJavaExecutionControl execControl;
 
-    private final JShell shell;
-    private final JJavaExecutionControlProvider execControlProvider;
-    private final String execControlID;
-    private final SourceCodeAnalysis sourceAnalyzer;
-    private final List<String> startupSnippets;
-
-    private volatile boolean initialized;
-
-    public CodeEvaluator(
-            JShell shell,
-            JJavaExecutionControlProvider execControlProvider,
-            String execControlID,
-            List<String> startupSnippets) {
-
-        this.shell = shell;
-        this.execControlProvider = execControlProvider;
-        this.execControlID = execControlID;
-        this.sourceAnalyzer = shell.sourceCodeAnalysis();
-        this.startupSnippets = startupSnippets;
+    public CodeEvaluator(String name, long timeoutDuration, TimeUnit timeoutUnit) {
+        this.name = name;
+        this.timeoutDuration = timeoutDuration;
+        this.timeoutUnit = timeoutUnit;
+        this.loaderDelegate = new JJavaLoaderDelegate();
+        this.execControl = new JJavaExecutionControl(loaderDelegate, timeoutDuration, timeoutUnit);
     }
 
-    private SourceCodeAnalysis.CompletionInfo analyzeCompletion(String source) {
-        return sourceAnalyzer.analyzeCompletion(source);
+    public void startThreadTelemetryCollection(TelemetryCollector<?> collector) {
+        execControl.startThreadTelemetryCollection(collector);
     }
 
-    protected Object evalSingle(String code) {
+    public void stopThreadTelemetryCollection() {
+        execControl.stopThreadTelemetryCollection();
+    }
 
-        JJavaExecutionControl executionControl = execControlProvider.getRegisteredControlByID(execControlID);
+    /**
+     * Returns ExecutionControlProvider required by JShell. This links JShell execution engine to our code evaluator.
+     */
+    public ExecutionControlProvider getExecControlProvider() {
+        return new SimpleExecControlProvider(name, execControl);
+    }
+
+    public Object eval(JShell shell, String code) {
+
+        SourceCodeAnalysis sca = shell.sourceCodeAnalysis();
+
+        Object lastResult = null;
+        SourceCodeAnalysis.CompletionInfo info = sca.analyzeCompletion(code);
+
+        while (info.completeness().isComplete()) {
+
+            lastResult = evalSingle(shell, info.source());
+            info = sca.analyzeCompletion(info.remaining());
+        }
+
+        if (info.completeness() != SourceCodeAnalysis.Completeness.EMPTY) {
+            throw new IncompleteSourceException(info.remaining().trim());
+        }
+
+        return lastResult;
+    }
+
+    protected Object evalSingle(JShell shell, String code) {
+
         List<SnippetEvent> events = shell.eval(code);
 
         Object result = null;
@@ -70,12 +98,14 @@ public class CodeEvaluator {
         for (SnippetEvent event : events) {
             if (event.status() == Snippet.Status.OVERWRITTEN) {
                 // if a new snippet changed some other definition, drop the older one
-                dropSnippet(event.snippet());
+                dropSnippet(shell, event.snippet());
                 continue;
             }
 
             String key = event.value();
-            if (key == null) continue;
+            if (key == null) {
+                continue;
+            }
 
             Snippet.SubKind subKind = event.snippet().subKind();
 
@@ -83,7 +113,7 @@ public class CodeEvaluator {
             // JJavaExecutionControl. Declarations for example simply take their default value without
             // being executed.
             Object value = subKind.isExecutable()
-                    ? executionControl.takeResult(key)
+                    ? execControl.takeResult(key)
                     : event.value();
 
             switch (subKind) {
@@ -108,7 +138,7 @@ public class CodeEvaluator {
                         EvalException ee = (EvalException) e;
                         switch (ee.getExceptionClassName()) {
                             case JJavaExecutionControl.EXECUTION_TIMEOUT_NAME:
-                                throw new EvaluationTimeoutException(executionControl.getTimeoutDuration(), executionControl.getTimeoutUnit(), code.trim());
+                                throw new EvaluationTimeoutException(timeoutDuration, timeoutUnit, code.trim());
                             case JJavaExecutionControl.EXECUTION_INTERRUPTED_NAME:
                                 throw new EvaluationInterruptedException(code.trim());
                             default:
@@ -119,7 +149,10 @@ public class CodeEvaluator {
                     throw new RuntimeException(e);
                 }
 
-                if (!event.status().isDefined()) {
+                // Undefined snippets are generally bad, unless we can still recover from them. E.g.,
+                // "Unresolved dependencies" errors are recoverable when those dependencies are defined in the later
+                // snippets.
+                if (event.status() != Snippet.Status.RECOVERABLE_NOT_DEFINED && !event.status().isDefined()) {
                     throw new CompilationException(event);
                 }
             }
@@ -128,56 +161,10 @@ public class CodeEvaluator {
         return result;
     }
 
-    public Object eval(String code) {
-        initIfNeeded();
-        return doEval(code);
-    }
-
-    private void initIfNeeded() {
-
-        // TODO: should we even bother trying to avoid a race condition with locking? Does Jupyter guarantee serial
-        //  cell execution?
-        if (!initialized) {
-            synchronized (this) {
-                if (!initialized) {
-
-                    // Runs startup snippets in the shell to initialize the environment. The call is deferred until the
-                    // first user requested evaluation to cleanly return errors when they happen.
-
-                    for (String s : startupSnippets) {
-                        // call "doEval" to bypass "initIfNeeded" and avoid infinite recursion
-                        doEval(s);
-                    }
-
-                    startupSnippets.clear();
-                    initialized = true;
-                }
-            }
-        }
-    }
-
-
-    private Object doEval(String code) {
-        Object lastEvalResult = null;
-        SourceCodeAnalysis.CompletionInfo info = this.sourceAnalyzer.analyzeCompletion(code);
-
-        while (info.completeness().isComplete()) {
-            lastEvalResult = evalSingle(info.source());
-            info = analyzeCompletion(info.remaining());
-        }
-
-        if (info.completeness() != SourceCodeAnalysis.Completeness.EMPTY) {
-            throw new IncompleteSourceException(info.remaining().trim());
-        }
-
-        return lastEvalResult;
-    }
-
     /**
      * Try to clean up information linked to a code snippet and the snippet itself
      */
-    private void dropSnippet(Snippet snippet) {
-        JJavaExecutionControl execControl = execControlProvider.getRegisteredControlByID(execControlID);
+    private void dropSnippet(JShell shell, Snippet snippet) {
         shell.drop(snippet);
         // snippet.classFullName() returns name of a wrapper class created for a snippet
         String className = snippetClassName(snippet);
@@ -241,10 +228,10 @@ public class CodeEvaluator {
                 : currentIndentation;
     }
 
-    public String isComplete(String code) {
-        SourceCodeAnalysis.CompletionInfo info = this.sourceAnalyzer.analyzeCompletion(code);
+    public String isComplete(SourceCodeAnalysis sourceAnalyzer, String code) {
+        SourceCodeAnalysis.CompletionInfo info = sourceAnalyzer.analyzeCompletion(code);
         while (info.completeness().isComplete()) {
-            info = analyzeCompletion(info.remaining());
+            info = sourceAnalyzer.analyzeCompletion(info.remaining());
         }
 
         switch (info.completeness()) {
@@ -258,7 +245,7 @@ public class CodeEvaluator {
             case CONSIDERED_INCOMPLETE:
             case DEFINITELY_INCOMPLETE:
                 // Compute the indent of the last line and match it
-                return this.computeIndentation(info.remaining());
+                return computeIndentation(info.remaining());
             default:
                 // For completeness, return an "I don't know" if we somehow get down here
                 return BaseKernel.IS_COMPLETE_MAYBE;
@@ -266,15 +253,31 @@ public class CodeEvaluator {
     }
 
     public void interrupt() {
-        JJavaExecutionControl execControl = execControlProvider.getRegisteredControlByID(execControlID);
-
-        if (execControl != null) {
-            execControl.interrupt();
-        }
+        execControl.interrupt();
     }
 
     public ClassLoader getClassLoader() {
-        JJavaExecutionControl execControl = execControlProvider.getRegisteredControlByID(execControlID);
-        return execControl != null ? execControl.getClassLoader() : null;
+        return loaderDelegate.getClassLoader();
+    }
+
+    static final class SimpleExecControlProvider implements ExecutionControlProvider {
+
+        private final String name;
+        private final ExecutionControl control;
+
+        public SimpleExecControlProvider(String name, ExecutionControl control) {
+            this.name = name;
+            this.control = control;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public ExecutionControl generate(ExecutionEnv env, Map<String, String> parameters) {
+            return control;
+        }
     }
 }

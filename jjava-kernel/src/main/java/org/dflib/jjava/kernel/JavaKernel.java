@@ -16,9 +16,9 @@ import org.dflib.jjava.jupyter.kernel.comm.CommManager;
 import org.dflib.jjava.jupyter.kernel.display.DisplayData;
 import org.dflib.jjava.jupyter.kernel.display.Renderer;
 import org.dflib.jjava.jupyter.kernel.history.HistoryManager;
-import org.dflib.jjava.jupyter.kernel.magic.MagicParser;
 import org.dflib.jjava.jupyter.kernel.magic.MagicTranspiler;
 import org.dflib.jjava.jupyter.kernel.magic.MagicsRegistry;
+import org.dflib.jjava.jupyter.kernel.magic.MagicsResolver;
 import org.dflib.jjava.jupyter.kernel.util.CharPredicate;
 import org.dflib.jjava.jupyter.kernel.util.PathsHandler;
 import org.dflib.jjava.jupyter.kernel.util.StringStyler;
@@ -27,7 +27,6 @@ import org.dflib.jjava.kernel.execution.CompilationException;
 import org.dflib.jjava.kernel.execution.EvaluationInterruptedException;
 import org.dflib.jjava.kernel.execution.EvaluationTimeoutException;
 import org.dflib.jjava.kernel.execution.IncompleteSourceException;
-import org.dflib.jjava.kernel.execution.JJavaExecutionControlProvider;
 
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -72,7 +71,7 @@ public class JavaKernel extends BaseKernel {
             JupyterIO io,
             CommManager commManager,
             Renderer renderer,
-            MagicParser magicParser,
+            MagicsResolver magicsResolver,
             MagicsRegistry magicsRegistry,
             boolean extensionsEnabled,
             StringStyler errorStyler,
@@ -88,7 +87,7 @@ public class JavaKernel extends BaseKernel {
                 io,
                 commManager,
                 renderer,
-                magicParser,
+                magicsResolver,
                 magicsRegistry,
                 extensionsEnabled,
                 errorStyler);
@@ -115,7 +114,7 @@ public class JavaKernel extends BaseKernel {
     }
 
     @Override
-    public List<String> formatError(Throwable e) {
+    protected List<String> formatError(Throwable e) {
         if (e instanceof CompilationException) {
             return formatCompilationException((CompilationException) e);
         } else if (e instanceof IncompleteSourceException) {
@@ -252,12 +251,9 @@ public class JavaKernel extends BaseKernel {
         return fmt;
     }
 
-    /**
-     * Same as {@link #eval(String)}, but not applying the renderer to evaluation result.
-     */
     @Override
-    public Object evalRaw(String source) {
-        return evaluator.eval(magicParser.resolveMagics(source));
+    protected Object doEval(String source) {
+        return evaluator.eval(jShell, source);
     }
 
     @Override
@@ -359,7 +355,7 @@ public class JavaKernel extends BaseKernel {
 
     @Override
     public String isComplete(String code) {
-        return this.evaluator.isComplete(code);
+        return evaluator.isComplete(jShell.sourceCodeAnalysis(), code);
     }
 
     @Override
@@ -370,7 +366,7 @@ public class JavaKernel extends BaseKernel {
 
     @Override
     public void interrupt() {
-        this.evaluator.interrupt();
+        evaluator.interrupt();
     }
 
     /**
@@ -388,6 +384,10 @@ public class JavaKernel extends BaseKernel {
         return jShell;
     }
 
+    public CodeEvaluator getEvaluator() {
+        return evaluator;
+    }
+
     public static class Builder extends JavaKernelBuilder<Builder, JavaKernel> {
         private Builder() {
         }
@@ -397,8 +397,9 @@ public class JavaKernel extends BaseKernel {
 
             String name = buildName();
             Charset jupyterEncoding = buildJupyterIOEncoding();
-            JJavaExecutionControlProvider jShellExecutionControlProvider = buildJShellExecControlProvider(name);
-            JShell jShell = buildJShell(jShellExecutionControlProvider);
+            CodeEvaluator evaluator = buildCodeEvaluator(name);
+
+            JShell jShell = buildJShell(evaluator);
             LanguageInfo langInfo = buildLanguageInfo();
             MagicTranspiler magicTranspiler = buildMagicTranspiler();
 
@@ -411,12 +412,12 @@ public class JavaKernel extends BaseKernel {
                     buildJupyterIO(jupyterEncoding),
                     buildCommManager(),
                     buildRenderer(),
-                    buildMagicParser(magicTranspiler),
+                    buildMagicsResolver(magicTranspiler),
                     buildMagicsRegistry(),
                     buildExtensionsEnabled(),
                     buildErrorStyler(),
                     jShell,
-                    buildCodeEvaluator(jShell, jShellExecutionControlProvider)
+                    evaluator
             );
         }
 

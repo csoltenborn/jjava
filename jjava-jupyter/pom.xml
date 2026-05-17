@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.dflib.jjava</groupId>
         <artifactId>jjava-parent</artifactId>
-        <version>1.0-a6</version>
+        <version>1.0-a7</version>
     </parent>
 
     <artifactId>jjava-jupyter</artifactId>
@@ -39,7 +39,7 @@
         </dependency>
         <dependency>
             <groupId>org.hamcrest</groupId>
-            <artifactId>hamcrest-all</artifactId>
+            <artifactId>hamcrest</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

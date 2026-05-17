@@ -6,7 +6,8 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 public class JavaKernelExtensionsLifecycleTest {
 
@@ -61,10 +62,10 @@ public class JavaKernelExtensionsLifecycleTest {
             kernel.onStartup();
             kernel.addToClasspath(extraClasspath);
 
-            Object installed = kernel.evalRaw("evalExtensionInstalled");
+            Object installed = kernel.evalBuilder("evalExtensionInstalled").eval();
             assertEquals(true, installed, "EvalExtension should have been installed");
 
-            Object result = kernel.evalRaw("evalValue");
+            Object result = kernel.evalBuilder("evalValue").eval();
             assertEquals("Test message", result.toString(), "eval() call was not successful");
         } finally {
             kernel.onShutdown(false);
@@ -93,10 +94,10 @@ public class JavaKernelExtensionsLifecycleTest {
             kernel.onStartup();
             kernel.addToClasspath(extraClasspath);
 
-            Object installed = kernel.evalRaw("externalLibraryExtensionInstalled");
+            Object installed = kernel.evalBuilder("externalLibraryExtensionInstalled").eval();
             assertEquals(true, installed, "ExternalLibraryExtension should have been installed");
 
-            Object result = kernel.evalRaw("externalLibraryValue");
+            Object result = kernel.evalBuilder("externalLibraryValue").eval();
             assertEquals("Test message", result.toString(), "Library class method call was not successful");
         } finally {
             kernel.onShutdown(false);

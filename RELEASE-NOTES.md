@@ -1,3 +1,15 @@
+## 1.0-a7
+
+* #65 mutual dependent class not working
+* #67 JJAVA_STARTUP_SCRIPT can't start up spark
+* #102 Eval startup snippets explicitly
+* #104 %time magic
+* #105 Exploding classpath
+* #107 "java.class.path" uses an incorrect separator
+* #110 Magic return values are suppressed
+* #111 "kernel.evalBuilder(..)"
+* #112 Use the same thread for "kernel.doEval(..)" nested calls
+
 ## 1.0-a6
 
 * #68 CompilationException doesn't provide any information about the underlying problem

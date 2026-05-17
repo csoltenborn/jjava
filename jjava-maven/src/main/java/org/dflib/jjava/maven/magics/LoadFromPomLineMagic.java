@@ -1,9 +1,9 @@
 package org.dflib.jjava.maven.magics;
 
-import org.dflib.jjava.jupyter.kernel.util.PathsHandler;
-import org.dflib.jjava.kernel.JavaKernel;
 import org.dflib.jjava.jupyter.kernel.magic.LineMagic;
 import org.dflib.jjava.jupyter.kernel.magic.MagicsArgs;
+import org.dflib.jjava.jupyter.kernel.util.PathsHandler;
+import org.dflib.jjava.kernel.JavaKernel;
 import org.dflib.jjava.maven.MavenDependencyResolver;
 
 import java.io.File;
@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-public class LoadFromPomLineMagic implements LineMagic<List<String>, JavaKernel> {
+public class LoadFromPomLineMagic implements LineMagic<Void, JavaKernel> {
 
     private final MavenDependencyResolver mavenResolver;
 
@@ -20,7 +20,7 @@ public class LoadFromPomLineMagic implements LineMagic<List<String>, JavaKernel>
     }
 
     @Override
-    public List<String> eval(JavaKernel kernel, List<String> args) {
+    public Void eval(JavaKernel kernel, List<String> args) {
         if (args.isEmpty()) {
             throw new IllegalArgumentException("Loading from POM requires at least the path to the POM file");
         }
@@ -40,6 +40,6 @@ public class LoadFromPomLineMagic implements LineMagic<List<String>, JavaKernel>
                 .collect(Collectors.toList());
 
         kernel.addToClasspath(PathsHandler.joinStringPaths(deps));
-        return deps;
+        return null;
     }
 }

@@ -6,6 +6,7 @@ import org.dflib.jjava.kernel.JavaKernel;
 import org.dflib.jjava.kernel.magics.ClasspathMagic;
 import org.dflib.jjava.kernel.magics.JarsMagic;
 import org.dflib.jjava.kernel.magics.LoadCodeMagic;
+import org.dflib.jjava.kernel.magics.TimeMagic;
 import org.dflib.jjava.maven.MavenDependencyResolver;
 import org.dflib.jjava.maven.magics.AddMavenDependencyMagic;
 import org.dflib.jjava.maven.magics.LoadFromPomCellMagic;
@@ -19,6 +20,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The main class launching Jupyter Java kernel.
@@ -49,18 +53,22 @@ public class JJava {
         MavenDependencyResolver mavenResolver = new MavenDependencyResolver();
 
         Properties pomProps = loadPomProps();
+        TimeMagic timeMagic = new TimeMagic();
+
+        Timeout timeout = Timeout.parseOrDefault(System.getenv(Env.JJAVA_TIMEOUT));
 
         JavaKernel kernel = JavaKernel.builder()
                 .name("JJava")
                 .version((String) pomProps.getOrDefault("version", ""))
 
                 .extensionsEnabled(Env.extensionsEnabled())
-                .startupSnippets(Env.startupSnippets())
                 .compilerOpts(Env.compilerOpts())
-                .timeout(Env.timeout())
+                .timeout(timeout.time, timeout.timeUnit)
 
                 .lineMagic("load", new LoadCodeMagic("", ".jsh", ".jshell", ".java", ".jjava"))
                 .lineMagic("classpath", new ClasspathMagic())
+                .lineMagic("time", timeMagic)
+
                 .lineMagic("maven", new MavenMagic(mavenResolver))
                 .lineMagic("mavenRepo", new MavenRepoMagic(mavenResolver))
                 .lineMagic("loadFromPOM", new LoadFromPomLineMagic(mavenResolver))
@@ -70,6 +78,7 @@ public class JJava {
                 .lineMagic("addMavenDependency", new AddMavenDependencyMagic(mavenResolver))
 
                 .cellMagic("loadFromPOM", new LoadFromPomCellMagic(mavenResolver))
+                .cellMagic("time", timeMagic)
 
                 .build();
 
@@ -78,6 +87,9 @@ public class JJava {
 
         // process custom locations: expand JShell classpath, install extensions from those places (if enabled)
         kernel.addToClasspath(Env.extraClasspath());
+
+        // run user defined startup snippets explicitly after the default startup
+        Env.startupSnippets().forEach(s -> kernel.evalBuilder(s).resolveMagics().eval());
 
         // connect to Jupyter
         kernel.becomeHandlerForConnection(connection);
@@ -104,6 +116,42 @@ public class JJava {
         } catch (IOException e) {
             // generally, this should be ignorable, but it should also never happen, so still rethrow
             throw new RuntimeException("Error reading project properties");
+        }
+    }
+
+    private static class Timeout {
+        private static final Pattern TIMEOUT_PATTERN = Pattern.compile("^(?<dur>-?\\d+)\\W*(?<unit>[A-Za-z]+)?$");
+
+        static Timeout parseOrDefault(String value) {
+
+            if (value == null) {
+                return new Timeout(-1, TimeUnit.MILLISECONDS);
+            }
+
+            Matcher m = TIMEOUT_PATTERN.matcher(value);
+            if (!m.matches()) {
+                throw new IllegalArgumentException("Invalid timeout string: " + value);
+            }
+
+            long timeout = Long.parseLong(m.group("dur"));
+            TimeUnit unit = TimeUnit.MILLISECONDS;
+            if (m.group("unit") != null) {
+                try {
+                    unit = TimeUnit.valueOf(m.group("unit").toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("Invalid timeout unit: " + m.group("unit"));
+                }
+            }
+
+            return new Timeout(timeout, unit);
+        }
+
+        final long time;
+        final TimeUnit timeUnit;
+
+        public Timeout(long time, TimeUnit timeUnit) {
+            this.time = time;
+            this.timeUnit = timeUnit;
         }
     }
 }

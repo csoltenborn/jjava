@@ -3,9 +3,9 @@ package org.dflib.jjava.kernel.magics;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.stream.JsonReader;
-import org.dflib.jjava.kernel.JavaKernel;
 import org.dflib.jjava.jupyter.kernel.magic.LineMagic;
 import org.dflib.jjava.jupyter.kernel.magic.MagicsArgs;
+import org.dflib.jjava.kernel.JavaKernel;
 
 import java.io.FileNotFoundException;
 import java.io.Reader;
@@ -49,11 +49,13 @@ public class LoadCodeMagic implements LineMagic<Void, JavaKernel> {
             Path scriptPath = sourcePath.resolveSibling(file + extension);
             if (Files.isRegularFile(scriptPath)) {
 
+                // TODO: return rendered "eval" results to the caller would make sense here
+
                 if (scriptPath.getFileName().endsWith(NOTEBOOK_EXTENSION)) {
                     execNotebook(kernel, scriptPath);
                 } else {
-                    String sourceContents = Files.readString(scriptPath);
-                    kernel.eval(sourceContents);
+                    String source = Files.readString(scriptPath);
+                    kernel.evalBuilder(source).resolveMagics().eval();
                 }
                 return null;
             }
@@ -118,7 +120,7 @@ public class LoadCodeMagic implements LineMagic<Void, JavaKernel> {
 
                     // Found a code cell!
                     if (isCode != null && isCode) {
-                        kernel.eval(source);
+                        kernel.evalBuilder(source).resolveMagics().eval();
                     }
                 }
                 reader.endArray();

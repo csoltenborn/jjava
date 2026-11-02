@@ -1,14 +1,9 @@
 package org.dflib.jjava.distro;
 
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.Container;
 
 import java.util.Map;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.allOf;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class KernelEnvIT extends ContainerizedKernelCase {
@@ -16,98 +11,73 @@ public class KernelEnvIT extends ContainerizedKernelCase {
     @Test
     public void compilerOpts() throws Exception {
         Map<String, String> env = Map.of(Env.JJAVA_COMPILER_OPTS, "-source 9");
-        String snippet = "var value = 1;";
-        Container.ExecResult snippetResult = executeInKernel(snippet, env);
+        String cell = "var value = 1;";
+        KernelRun run = executeInKernel(env, cell);
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), allOf(
-                containsString("|   var value = 1;"),
-                containsString(Runtime.version().feature() == 11
+        run.cell(1).assertError(
+                "|   " + cell,
+                Runtime.version().feature() == 11
                         ? "'var' is a restricted local variable type"
-                        : "'var' is a restricted type name")
-        ));
+                        : "'var' is a restricted type name");
     }
 
     @Test
     public void timeout() throws Exception {
         Map<String, String> env = Map.of(Env.JJAVA_TIMEOUT, "3000");
-        String snippet = "Thread.sleep(5000);";
-        Container.ExecResult snippetResult = executeInKernel(snippet, env);
+        String cell = "Thread.sleep(5000);";
+        KernelRun run = executeInKernel(env, cell);
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), allOf(
-                containsString("|   " + snippet),
-                containsString("Evaluation timed out after 3000 milliseconds.")
-        ));
+        run.cell(1).assertError("|   " + cell, "Evaluation timed out after 3000 milliseconds.");
     }
 
     @Test
     public void classpath() throws Exception {
         Map<String, String> env = Map.of(Env.JJAVA_CLASSPATH, TEST_CLASSPATH);
-        String snippet = String.join("\n",
+        KernelRun run = executeInKernel(env,
                 "import org.dflib.jjava.Dummy;",
                 "\"className = \" + Dummy.class.getName();"
-        );
-        Container.ExecResult snippetResult = executeInKernel(snippet, env);
+        ).assertNoErrors();
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), not(containsString("|")));
-        assertThat(snippetResult.getStdout(), containsString("className = org.dflib.jjava.Dummy"));
+        assertEquals("className = org.dflib.jjava.Dummy", run.cell(2).result());
     }
 
     @Test
     public void startUpScriptsPath() throws Exception {
         Map<String, String> env = Map.of(Env.JJAVA_STARTUP_SCRIPTS_PATH, CONTAINER_RESOURCES + "/test-ping.jshell");
-        String snippet = "ping()";
-        Container.ExecResult snippetResult = executeInKernel(snippet, env);
+        KernelRun run = executeInKernel(env, "ping()").assertNoErrors();
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), not(containsString("|")));
-        assertThat(snippetResult.getStdout(), containsString("pong!"));
+        assertEquals("pong!", run.cell(1).result());
     }
 
     @Test
     public void startUpScript() throws Exception {
         Map<String, String> env = Map.of(Env.JJAVA_STARTUP_SCRIPT, "public String ping() { return \"pong!\"; }");
-        String snippet = "ping()";
-        Container.ExecResult snippetResult = executeInKernel(snippet, env);
+        KernelRun run = executeInKernel(env, "ping()").assertNoErrors();
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), not(containsString("|")));
-        assertThat(snippetResult.getStdout(), containsString("pong!"));
+        assertEquals("pong!", run.cell(1).result());
     }
 
     @Test
     public void loadExtensions_Default() throws Exception {
-        String snippet = "printf(\"Hello, %s!\", \"world\");";
-        Container.ExecResult snippetResult = executeInKernel(snippet);
+        KernelRun run = executeInKernel("printf(\"Hello, %s!\", \"world\");").assertNoErrors();
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), not(containsString("|")));
-        assertThat(snippetResult.getStdout(), containsString("Hello, world!"));
+        assertEquals("Hello, world!", run.cell(1).stdout());
     }
 
     @Test
     public void loadExtensions_Disable() throws Exception {
         Map<String, String> env = Map.of(Env.JJAVA_LOAD_EXTENSIONS, "0");
-        String snippet = "printf(\"Hello, %s!\", \"world\");";
-        Container.ExecResult snippetResult = executeInKernel(snippet, env);
+        String cell = "printf(\"Hello, %s!\", \"world\");";
+        KernelRun run = executeInKernel(env, cell);
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), allOf(
-                containsString("|   " + snippet),
-                containsString("cannot find symbol")
-        ));
+        run.cell(1).assertError("|   " + cell, "cannot find symbol");
     }
 
     @Test
     public void jvmOpts() throws Exception {
         Map<String, String> env = Map.of(Env.JJAVA_JVM_OPTS, "-Xmx300m");
-        String snippet = "Runtime.getRuntime().maxMemory()";
-        Container.ExecResult snippetResult = executeInKernel(snippet, env);
+        KernelRun run = executeInKernel(env, "Runtime.getRuntime().maxMemory()").assertNoErrors();
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), not(containsString("|")));
-        assertThat(snippetResult.getStdout(), containsString(String.valueOf(300 * (int) Math.pow(1024, 2))));
+        assertEquals(String.valueOf(300 * (int) Math.pow(1024, 2)), run.cell(1).result());
     }
 }

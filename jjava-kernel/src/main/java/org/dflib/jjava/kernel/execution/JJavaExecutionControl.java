@@ -131,6 +131,18 @@ class JJavaExecutionControl extends DirectExecutionControl {
         return id;
     }
 
+    private RunException wrapInRunException(Throwable cause) {
+        if (cause instanceof SPIResolutionException) {
+            return new ResolutionException(((SPIResolutionException) cause).id(), cause.getStackTrace());
+        }
+
+        UserException ue = new UserException(String.valueOf(cause.getMessage()), cause.getClass().getName(), cause.getStackTrace());
+        if (cause.getCause() != null) {
+            ue.initCause(wrapInRunException(cause.getCause()));
+        }
+        return ue;
+    }
+
     private Object doInvoke(String id, Method doitMethod) throws Exception {
 
         Future<Object> task = isNestedCall()
@@ -160,10 +172,8 @@ class JJavaExecutionControl extends DirectExecutionControl {
             }
             if (cause == null) {
                 throw new UserException("null", "Unknown Invocation Exception", e.getStackTrace());
-            } else if (cause instanceof SPIResolutionException) {
-                throw new ResolutionException(((SPIResolutionException) cause).id(), cause.getStackTrace());
             } else {
-                throw new UserException(String.valueOf(cause.getMessage()), cause.getClass().getName(), cause.getStackTrace());
+                throw wrapInRunException(cause);
             }
         } catch (TimeoutException e) {
             String message = String.format("Execution timed out after configured timeout of %d %s.",

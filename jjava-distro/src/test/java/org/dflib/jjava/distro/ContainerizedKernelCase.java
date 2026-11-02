@@ -22,8 +22,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -40,6 +38,7 @@ public abstract class ContainerizedKernelCase {
     private static final String BASE_IMAGE = String.format("eclipse-temurin:%s", Runtime.version().feature());
     private static final String FS_KERNELSPEC = "../kernelspec/java";
     private static final String FS_RESOURCES = "src/test/resources";
+    private static final String KERNEL_DRIVER = CONTAINER_RESOURCES + "/kernel-driver.py";
 
     static {
         // On Windows, Docker Desktop uses a non-default named pipe and requires Docker API >= 1.44.
@@ -108,46 +107,43 @@ public abstract class ContainerizedKernelCase {
         return container.execInContainer(wrappedCommands.toArray(new String[]{}));
     }
 
-    protected static Container.ExecResult executeInKernel(String snippet) throws IOException, InterruptedException {
-        return executeInKernel(snippet, Collections.emptyMap());
+    /**
+     * Starts a fresh kernel and executes the given cells against it, one Jupyter "execute_request"
+     * per cell. A cell may span multiple lines, and is evaluated by the kernel as a single unit,
+     * exactly like a notebook cell.
+     */
+    protected static KernelRun executeInKernel(String... cells) throws IOException, InterruptedException {
+        return executeInKernel(Collections.emptyMap(), cells);
     }
 
-    protected static Container.ExecResult executeInKernel(String snippet, Map<String, String> env) throws IOException, InterruptedException {
-        long snippetLines = snippet.lines().count();
-        String snippetEscaped = snippet.replace("\\", "\\\\").replace("\"", "\\\"");
-        String snippetFeeding = Arrays.stream(snippetEscaped.split("\n"))
-                .flatMap(line -> Stream.of(
-                        "p.expect(r'In \\[\\d+\\]:')",
-                        "p.sendline(\"" + line + "\")"
-                ))
-                .collect(Collectors.joining("\n"));
+    /**
+     * Same as {@link #executeInKernel(String...)}, with extra environment variables visible to the
+     * kernel process.
+     */
+    protected static KernelRun executeInKernel(Map<String, String> env, String... cells) throws IOException, InterruptedException {
 
-        String pexpectScript = String.join("\n",
-                "import pexpect, sys, os, time",
-                "env = os.environ.copy()",
-                "env['PROMPT_TOOLKIT_NO_CPR'] = '1'",
-                "env['TERM'] = 'dumb'",
-                "p=pexpect.spawn('" + venvCommand("jupyter") + "', "
-                        + "['console', '--kernel=java', '--no-confirm-exit'], "
-                        + "env=env, timeout=60, encoding='utf-8')",
-                "p.logfile_read = sys.stdout",
-                snippetFeeding,
-                "p.expect(r'In \\[" + (snippetLines + 1) + "\\]:')",
-                "p.close(force=True)"
-        );
-        String[] containerCommand = new String[]{venvCommand("python"), "-c", pexpectScript};
+        List<String> command = new ArrayList<>();
+        command.add(venvCommand("python"));
+        command.add(KERNEL_DRIVER);
+        command.addAll(Arrays.asList(cells));
+
         Container.ExecResult execResult = container.execInContainer(ExecConfig.builder()
                 .envVars(env)
-                .command(containerCommand)
+                .command(command.toArray(new String[]{}))
                 .build()
         );
 
         LOGGER.info("env = {}", env);
-        LOGGER.info("snippet = {}", snippet);
-        LOGGER.info("exitCode = {}", execResult.getExitCode());
+        LOGGER.info("cells = {}", Arrays.asList(cells));
         LOGGER.debug("stdout = {}", execResult.getStdout());
         LOGGER.debug("stderr = {}", execResult.getStderr());
-        return execResult;
+
+        assertEquals(0, execResult.getExitCode(),
+                "Kernel driver failed:\n" + execResult.getStdout() + execResult.getStderr());
+
+        KernelRun run = KernelRun.parse(cells, execResult.getStdout());
+        LOGGER.info("run =\n{}", run);
+        return run;
     }
 
     private static String getStartupCommand() {
@@ -155,7 +151,7 @@ public abstract class ContainerizedKernelCase {
                 "apt-get update",
                 "apt-get install --no-install-recommends -y python3 python3-pip python3-venv curl",
                 "python3 -m venv ./venv",
-                venvCommand("pip install jupyter-console pexpect --progress-bar off"),
+                venvCommand("pip install jupyter-client --progress-bar off"),
                 "tail -f /dev/null"
         );
     }
@@ -163,7 +159,7 @@ public abstract class ContainerizedKernelCase {
     private static String getSuccessfulCommand() {
         return venvCommand("jupyter kernelspec list")
                 + " | grep ' java ' && "
-                + venvCommand("jupyter console --version");
+                + venvCommand("python") + " -c 'import jupyter_client'";
     }
 
     private static String venvCommand(String command) {

@@ -354,7 +354,6 @@ public abstract class BaseKernel {
 
     protected List<String> formatError(Throwable e) {
         List<String> lines = new ArrayList<>();
-        lines.add(this.errorStyler.secondary("---------------------------------------------------------------------------"));
 
         StringWriter stringWriter = new StringWriter();
         PrintWriter printWriter = new PrintWriter(stringWriter);

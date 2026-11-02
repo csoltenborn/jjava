@@ -1,26 +1,19 @@
 package org.dflib.jjava.distro;
 
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.Container;
 
 import java.util.Map;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.matchesPattern;
-import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class KernelStartupIT extends ContainerizedKernelCase {
 
     @Test
     public void startUp() throws Exception {
-        String snippet = "1000d + 1";
-        Container.ExecResult snippetResult = executeInKernel(snippet);
+        KernelRun run = executeInKernel("1000d + 1").assertNoErrors();
 
-        assertEquals(0, snippetResult.getExitCode(), snippetResult.getStdout());
-        assertThat(snippetResult.getStdout(), not(containsString("|")));
-        assertThat(snippetResult.getStdout(), containsString("1001.0"));
+        assertEquals("1001.0", run.cell(1).result());
     }
 
     @Test
@@ -29,10 +22,9 @@ public class KernelStartupIT extends ContainerizedKernelCase {
                 Env.JJAVA_CLASSPATH, TEST_CLASSPATH,
                 Env.JJAVA_STARTUP_SCRIPT, "var obj = new org.dflib.jjava.Dummy()"
         );
-        String snippet = "\"hash = \" + obj.hashCode()";
-        Container.ExecResult snippetResult = executeInKernel(snippet, env);
+        KernelRun run = executeInKernel(env, "\"hash = \" + obj.hashCode()").assertNoErrors();
 
-        assertThat(snippetResult.getStdout(), not(containsString("|")));
-        assertThat(snippetResult.getStdout(), matchesPattern("(?s).*hash = -?\\d+.*"));
+        String result = run.cell(1).result();
+        assertTrue(result.matches("hash = -?\\d+"), () -> "Unexpected result: " + result);
     }
 }

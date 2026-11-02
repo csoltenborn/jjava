@@ -89,7 +89,7 @@ public class CodeEvaluator {
 
     protected Object evalSingle(JShell shell, String code) {
 
-        List<SnippetEvent> events = shell.eval(code);
+        List<SnippetEvent> events = shell.eval(code.strip());
 
         Object result = null;
 

@@ -131,6 +131,8 @@ public class JavaKernel extends BaseKernel {
             return formatEvaluationTimeoutException((EvaluationTimeoutException) e);
         } else if (e instanceof EvaluationInterruptedException) {
             return formatEvaluationInterruptedException((EvaluationInterruptedException) e);
+        } else if (e instanceof RuntimeException && e.getCause() instanceof EvalException) {
+            return formatEvalException((EvalException) e.getCause());
         } else {
             return new ArrayList<>(super.formatError(e));
         }

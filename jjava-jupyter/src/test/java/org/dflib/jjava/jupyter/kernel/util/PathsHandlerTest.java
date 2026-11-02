@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -31,16 +32,16 @@ public class PathsHandlerTest {
         Files.createFile(dir.resolve("c1.txt"));
 
         // GlobResolver requires "/" as the path separator (even on Windows)
-        String basePath = dir.toString().replace(File.separator, "/") + "/";
+        String baseGlob = dir.toString().replace(File.separator, "/") + "/";
 
         assertEquals(List.of(), PathsHandler.splitAndResolveGlobs(""));
-        assertEquals(List.of(), PathsHandler.splitAndResolveGlobs(basePath + "a"));
-        assertEquals(List.of(), PathsHandler.splitAndResolveGlobs(basePath + "a" + File.pathSeparator + "b/c/d"));
+        assertEquals(List.of(), PathsHandler.splitAndResolveGlobs(baseGlob + "a"));
+        assertEquals(List.of(), PathsHandler.splitAndResolveGlobs(baseGlob + "a" + File.pathSeparator + "b/c/d"));
 
-        assertEquals(List.of(basePath + "a1.txt", basePath + "a2.txt"),
-                PathsHandler.splitAndResolveGlobs(basePath + "a*").stream().map(p -> p.toAbsolutePath().toString().replace(File.separator, "/")).sorted().collect(Collectors.toList()));
+assertEquals(List.of(baseGlob + "a1.txt", baseGlob + "a2.txt"),
+                PathsHandler.splitAndResolveGlobs(baseGlob + "a*").stream().map(p -> p.toAbsolutePath().toString().replace(File.separator, "/")).sorted().collect(Collectors.toList()));
         assertEquals(
-                List.of(basePath + "a1.txt", basePath + "a2.txt", basePath + "b1.txt", basePath + "b2.txt"),
-                PathsHandler.splitAndResolveGlobs(basePath + "a*" + File.pathSeparator + basePath + "b*").stream().map(p -> p.toAbsolutePath().toString().replace(File.separator, "/")).sorted().collect(Collectors.toList()));
+                List.of(baseGlob + "a1.txt", baseGlob + "a2.txt", baseGlob + "b1.txt", baseGlob + "b2.txt"),
+                PathsHandler.splitAndResolveGlobs(baseGlob + "a*" + File.pathSeparator + baseGlob + "b*").stream().map(p -> p.toAbsolutePath().toString().replace(File.separator, "/")).sorted().collect(Collectors.toList()));
     }
 }

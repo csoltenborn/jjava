@@ -4,5 +4,5 @@ import java.util.List;
 
 @FunctionalInterface
 public interface ErrorFormatter {
-    List<String> format(Exception e);
+    List<String> format(Throwable t);
 }

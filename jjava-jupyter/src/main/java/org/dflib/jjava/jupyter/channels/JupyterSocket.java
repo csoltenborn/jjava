@@ -39,8 +39,14 @@ import java.util.Map;
 
 public abstract class JupyterSocket extends ZMQ.Socket {
 
+    /**
+     * Builds a ZeroMQ endpoint for a channel from the connection file properties. For the {@code ipc} transport,
+     * Jupyter treats {@code ip} as a base path and names each channel socket {@code "{ip}-{port}"}
+     * (this is what {@code jupyter_client} writes and what frontends connect to).
+     */
     protected static String formatAddress(String transport, String ip, int port) {
-        return transport + "://" + ip + ":" + port;
+        String separator = "ipc".equalsIgnoreCase(transport) ? "-" : ":";
+        return transport + "://" + ip + separator + port;
     }
 
     // Comes from a Python bytestring

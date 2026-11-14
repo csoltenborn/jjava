@@ -22,13 +22,17 @@ public class Text {
     }
 
     public static void renderCharSequence(CharSequence data, RenderContext context) {
-        context.renderIfRequested(JS, () -> data);
-        context.renderIfRequested(PLAIN, () -> data);
-        context.renderIfRequested(MARKDOWN, () -> data);
-        context.renderIfRequested(LATEX, () -> data);
-        context.renderIfRequested(HTML, () -> data);
-        context.renderIfRequested(CSS, () -> data);
-        context.renderIfRequested(SVG, () -> data);
-        context.renderIfRequested(JSON, () -> data);
+        // materialize as String: the stored value is later serialized by Gson, which
+        // handles Strings but turns other CharSequence implementations into a reflective
+        // field dump (or fails on JDK-internal types such as CharBuffer)
+        String text = String.valueOf(data);
+        context.renderIfRequested(JS, () -> text);
+        context.renderIfRequested(PLAIN, () -> text);
+        context.renderIfRequested(MARKDOWN, () -> text);
+        context.renderIfRequested(LATEX, () -> text);
+        context.renderIfRequested(HTML, () -> text);
+        context.renderIfRequested(CSS, () -> text);
+        context.renderIfRequested(SVG, () -> text);
+        context.renderIfRequested(JSON, () -> text);
     }
 }

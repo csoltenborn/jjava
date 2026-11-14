@@ -22,8 +22,10 @@ You will need a **JDK** >= 11 and proper credentials for the `sonatype-central` 
 
 Two submodules of this project have different release strategies:
 
-- `JJava Kernel` assembly is released using GitHub releases
-- `jupyter-jvm-basekenel` module is released on Maven Central using the oss.sonatype.org repo
+- the library modules (`jjava-jupyter`, `jjava-kernel`, `jjava-maven`, `jjava-launcher`) are released
+  on Maven Central via the Sonatype Central Portal
+- the `jjava-distro` kernel assembly is released through GitHub Releases, and from there picked up by
+  the [Homebrew tap](https://github.com/dflib/homebrew-tap) and PyPI
 
 Still everything is done through a single set of Maven commands:
 

@@ -63,7 +63,8 @@ public class ShellChannel extends JupyterSocket {
                     ShellReplyEnvironment env = connection.prepareReplyEnv(this, message);
                     try {
                         handler.handle(env, message);
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
+                        // last-resort guard: nothing a handler throws may kill the channel loop
                         logger.warn("Unhandled exception handling {}. {} - {}",
                                 message.getHeader().getType().getName(),
                                 e.getClass().getSimpleName(),

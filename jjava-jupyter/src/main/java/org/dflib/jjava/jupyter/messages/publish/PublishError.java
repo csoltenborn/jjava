@@ -13,7 +13,7 @@ import java.util.List;
 public class PublishError implements ContentType<PublishError> {
     public static final MessageType<PublishError> MESSAGE_TYPE = MessageType.PUBLISH_ERROR;
 
-    public static PublishError of(Exception exception, ErrorFormatter formatter) {
+    public static PublishError of(Throwable exception, ErrorFormatter formatter) {
         String name = exception.getClass().getSimpleName();
         String msg = exception.getLocalizedMessage();
         List<String> stacktrace = formatter.format(exception);

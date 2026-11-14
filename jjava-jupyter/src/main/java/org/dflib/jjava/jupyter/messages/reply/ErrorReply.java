@@ -14,7 +14,7 @@ public class ErrorReply implements ReplyType<Object> {
         return MessageType.UNKNOWN;
     }
 
-    public static ErrorReply of(Exception exception) {
+    public static ErrorReply of(Throwable exception) {
         String name = exception.getClass().getSimpleName();
         String msg = exception.getLocalizedMessage();
         List<String> stacktrace = Arrays.stream(exception.getStackTrace())

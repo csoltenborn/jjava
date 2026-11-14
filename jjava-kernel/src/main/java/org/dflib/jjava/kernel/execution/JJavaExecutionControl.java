@@ -7,8 +7,11 @@ import org.dflib.jjava.jupyter.telemetry.TelemetryCollector;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -132,13 +135,18 @@ class JJavaExecutionControl extends DirectExecutionControl {
     }
 
     private RunException wrapInRunException(Throwable cause) {
+        return wrapInRunException(cause, Collections.newSetFromMap(new IdentityHashMap<>()));
+    }
+
+    private RunException wrapInRunException(Throwable cause, Set<Throwable> seen) {
+        seen.add(cause);
         if (cause instanceof SPIResolutionException) {
             return new ResolutionException(((SPIResolutionException) cause).id(), cause.getStackTrace());
         }
 
-        UserException ue = new UserException(String.valueOf(cause.getMessage()), cause.getClass().getName(), cause.getStackTrace());
-        if (cause.getCause() != null) {
-            ue.initCause(wrapInRunException(cause.getCause()));
+        UserException ue = new UserException(cause.getMessage(), cause.getClass().getName(), cause.getStackTrace());
+        if (cause.getCause() != null && !seen.contains(cause.getCause())) {
+            ue.initCause(wrapInRunException(cause.getCause(), seen));
         }
         return ue;
     }

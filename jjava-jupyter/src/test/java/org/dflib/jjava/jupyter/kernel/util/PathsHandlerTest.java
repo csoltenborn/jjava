@@ -31,17 +31,29 @@ public class PathsHandlerTest {
         Files.createFile(dir.resolve("b2.txt"));
         Files.createFile(dir.resolve("c1.txt"));
 
-        // GlobResolver requires "/" as the path separator (even on Windows)
-        String baseGlob = dir.toString().replace(File.separator, "/") + "/";
+        String baseGlob = dir + "/"; // glob resolver only accepts "/" as splitter
 
         assertEquals(List.of(), PathsHandler.splitAndResolveGlobs(""));
         assertEquals(List.of(), PathsHandler.splitAndResolveGlobs(baseGlob + "a"));
         assertEquals(List.of(), PathsHandler.splitAndResolveGlobs(baseGlob + "a" + File.pathSeparator + "b/c/d"));
 
-assertEquals(List.of(baseGlob + "a1.txt", baseGlob + "a2.txt"),
-                PathsHandler.splitAndResolveGlobs(baseGlob + "a*").stream().map(p -> p.toAbsolutePath().toString().replace(File.separator, "/")).sorted().collect(Collectors.toList()));
         assertEquals(
-                List.of(baseGlob + "a1.txt", baseGlob + "a2.txt", baseGlob + "b1.txt", baseGlob + "b2.txt"),
-                PathsHandler.splitAndResolveGlobs(baseGlob + "a*" + File.pathSeparator + baseGlob + "b*").stream().map(p -> p.toAbsolutePath().toString().replace(File.separator, "/")).sorted().collect(Collectors.toList()));
+                List.of(joinPath(dir, "a1.txt"), joinPath(dir, "a2.txt")),
+                PathsHandler.splitAndResolveGlobs(baseGlob + "a*").stream()
+                        .map(p -> p.toAbsolutePath().toString())
+                        .sorted()
+                        .collect(Collectors.toList())
+        );
+        assertEquals(
+                List.of(joinPath(dir, "a1.txt"), joinPath(dir, "a2.txt"), joinPath(dir, "b1.txt"), joinPath(dir, "b2.txt")),
+                PathsHandler.splitAndResolveGlobs(baseGlob + "a*" + File.pathSeparator + baseGlob + "b*").stream()
+                        .map(p -> p.toAbsolutePath().toString())
+                        .sorted()
+                        .collect(Collectors.toList())
+        );
+    }
+
+    private static String joinPath(Object... elements) {
+        return Stream.of(elements).map(String::valueOf).collect(Collectors.joining(File.separator));
     }
 }

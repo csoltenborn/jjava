@@ -30,6 +30,8 @@ import org.dflib.jjava.kernel.execution.IncompleteSourceException;
 
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -181,29 +183,36 @@ public class JavaKernel extends BaseKernel {
 
     private List<String> formatEvalException(EvalException e) {
         List<String> fmt = new ArrayList<>();
-
-        String actualExceptionName = e.getExceptionClassName();
-        fmt.add(errorStyler.secondary(actualExceptionName + ": " + e.getMessage()));
-        for (StackTraceElement element : e.getStackTrace()) {
-            fmt.add(errorStyler.secondary("\tat " + element));
-        }
-
-        formatEvalExceptionCause((EvalException) e.getCause(), fmt);
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        appendThrowableLines(e, fmt, "", seen);
         return fmt;
     }
 
-    private void formatEvalExceptionCause(EvalException e, List<String> fmt) {
-        if (e == null) {
+    private void appendThrowableLines(Throwable t, List<String> fmt, String prefix, Set<Throwable> seen) {
+        if (t == null) {
+            return;
+        }
+        if (!seen.add(t)) {
+            fmt.add(errorStyler.secondary(prefix + "[CIRCULAR REFERENCE: " + exceptionDisplayName(t) + "]"));
             return;
         }
 
-        String actualExceptionName = e.getExceptionClassName();
-        fmt.add(errorStyler.secondary("Caused by: " + actualExceptionName + ": " + e.getMessage()));
-        for (StackTraceElement element : e.getStackTrace()) {
+        String exceptionName = exceptionDisplayName(t);
+        String msg = t.getMessage();
+        fmt.add(errorStyler.secondary(prefix + exceptionName + (msg != null ? ": " + msg : "")));
+
+        for (StackTraceElement element : t.getStackTrace()) {
             fmt.add(errorStyler.secondary("\tat " + element));
         }
-        
-        formatEvalExceptionCause((EvalException) e.getCause(), fmt);
+
+        appendThrowableLines(t.getCause(), fmt, "Caused by: ", seen);
+    }
+
+    private String exceptionDisplayName(Throwable t) {
+        if (t instanceof EvalException) {
+            return ((EvalException) t).getExceptionClassName();
+        }
+        return t.getClass().getName();
     }
 
     private List<String> formatUnresolvedReferenceException(UnresolvedReferenceException e) {

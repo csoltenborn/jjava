@@ -202,10 +202,47 @@ public class JavaKernel extends BaseKernel {
         fmt.add(errorStyler.secondary(prefix + exceptionName + (msg != null ? ": " + msg : "")));
 
         for (StackTraceElement element : t.getStackTrace()) {
-            fmt.add(errorStyler.secondary("\tat " + element));
+            fmt.add(errorStyler.secondary("\tat " + formatStackTraceElement(element)));
         }
 
         appendThrowableLines(t.getCause(), fmt, "Caused by: ", seen);
+    }
+
+    private String formatStackTraceElement(StackTraceElement element) {
+        String fileName = element.getFileName();
+        if (fileName == null || !fileName.startsWith("#")) {
+            return element.toString();
+        }
+
+        String snippetId = fileName.substring(1);
+        CodeEvaluator.SnippetLocation location = evaluator.getSnippetLocation(snippetId);
+
+        int lineNumber = element.getLineNumber();
+        if (location != null && lineNumber > 0) {
+            lineNumber += location.getLineOffset();
+        }
+
+        String locationLabel = location != null && location.getExecutionCount() >= 0
+                ? "[" + location.getExecutionCount() + "]"
+                : fileName;
+        String source = lineNumber >= 0
+                ? locationLabel + ":" + lineNumber
+                : locationLabel;
+
+        String className = element.getClassName();
+        String methodName = element.getMethodName();
+        StringBuilder prefix = new StringBuilder();
+        if (className != null && !className.isEmpty()) {
+            prefix.append(className);
+        }
+        if (methodName != null && !methodName.isEmpty()) {
+            if (prefix.length() > 0) {
+                prefix.append('.');
+            }
+            prefix.append(methodName);
+        }
+
+        return prefix.append('(').append(source).append(')').toString();
     }
 
     private String exceptionDisplayName(Throwable t) {
@@ -252,7 +289,7 @@ public class JavaKernel extends BaseKernel {
 
     @Override
     protected Object doEval(String source) {
-        return evaluator.eval(jShell, source);
+        return evaluator.eval(jShell, source, getCurrentExecutionCount());
     }
 
     @Override

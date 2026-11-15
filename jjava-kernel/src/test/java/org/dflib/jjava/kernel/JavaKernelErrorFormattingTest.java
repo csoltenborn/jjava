@@ -4,11 +4,20 @@ import jdk.jshell.DeclarationSnippet;
 import jdk.jshell.EvalException;
 import jdk.jshell.JShellException;
 import jdk.jshell.UnresolvedReferenceException;
+import org.dflib.jjava.jupyter.channels.ShellReplyEnvironment;
+import org.dflib.jjava.jupyter.kernel.BaseKernel;
+import org.dflib.jjava.jupyter.messages.Message;
+import org.dflib.jjava.jupyter.messages.MessageType;
+import org.dflib.jjava.jupyter.messages.publish.PublishError;
+import org.dflib.jjava.jupyter.messages.request.ExecuteRequest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -275,5 +284,172 @@ public class JavaKernelErrorFormattingTest {
                 plain.stream().anyMatch(l -> l.contains("root cause")),
                 "Fallback formatting should preserve the cause message: " + plain
         );
+    }
+
+    @Test
+    public void formatsJshellFramesWithExecutionCountAndOmitsLeadingDot() throws Exception {
+        JavaKernel isolated = JavaKernel.builder()
+                .name("IsolatedErrorFormattingKernel")
+                .extensionsEnabled(false)
+                .build();
+        try {
+            assertEquals(List.of(), executeCell(isolated,
+                    "class HelperClass {\n"
+                    + "    static int divide(int x) {\n"
+                    + "        return 10 / x;\n"
+                    + "    }\n"
+                    + "}"));
+            assertEquals(List.of(), executeCell(isolated,
+                    "\nint compute(int x) {\n"
+                    + "    return HelperClass.divide(x);\n"
+                    + "}"));
+
+            List<String> traceback = executeCell(isolated, "/* header */\n\ncompute(0);");
+            assertFalse(traceback.isEmpty(), "Expected execution error traceback");
+            assertEquals("java.lang.ArithmeticException: / by zero", traceback.get(0));
+            assertTrue(traceback.contains("\tat HelperClass.divide([1]:3)"), "Missing class frame: " + traceback);
+            assertTrue(traceback.contains("\tat compute([2]:3)"), "Missing top-level method frame: " + traceback);
+            assertTrue(traceback.contains("\tat ([3]:3)"), "Missing top-level frame: " + traceback);
+            assertTrue(
+                    traceback.stream().noneMatch(l -> l.contains("at .(") || l.contains("at .compute(")),
+                    "Leading dot must be omitted for top-level JShell frames: " + traceback
+            );
+        } finally {
+            isolated.onShutdown(false);
+        }
+    }
+
+    @Test
+    public void tracksLineOffsetsAcrossMultipleStatementsInSameCell() throws Exception {
+        JavaKernel isolated = JavaKernel.builder()
+                .name("MultiStmtLineKernel")
+                .extensionsEnabled(false)
+                .build();
+        try {
+            List<String> traceback = executeCell(isolated,
+                    "int first = 1;\n"
+                    + "\n"
+                    + "void stepTwo() {\n"
+                    + "    int local = 2;\n"
+                    + "    throw new IllegalStateException(\"multi-stmt\");\n"
+                    + "}\n"
+                    + "\n"
+                    + "stepTwo();");
+            assertFalse(traceback.isEmpty());
+            assertTrue(traceback.contains("\tat stepTwo([1]:5)"), "Expected line 5 inside method: " + traceback);
+            assertTrue(traceback.contains("\tat ([1]:8)"), "Expected line 8 for caller statement: " + traceback);
+        } finally {
+            isolated.onShutdown(false);
+        }
+    }
+
+    @Test
+    public void updatesLocationWhenMethodRedefinedReusingSnippetId() throws Exception {
+        JavaKernel isolated = JavaKernel.builder()
+                .name("RedefineKernel")
+                .extensionsEnabled(false)
+                .build();
+        try {
+            assertEquals(List.of(), executeCell(isolated,
+                    "int redefSum(int x, int y) {\n"
+                    + "    return x + y;\n"
+                    + "}"));
+            assertEquals(List.of(), executeCell(isolated, "redefSum(1, 2);"));
+            assertEquals(List.of(), executeCell(isolated,
+                    "int redefSum(int x, int y) {\n"
+                    + "    return x / 0;\n"
+                    + "}"));
+
+            List<String> traceback = executeCell(isolated, "\nredefSum(1, 2);");
+            assertTrue(
+                    traceback.contains("\tat redefSum([3]:2)"),
+                    "Redefined method reusing JShell snippet ID must point to latest cell [3]: " + traceback
+            );
+            assertTrue(traceback.contains("\tat ([4]:2)"), "Expected caller frame ([4]:2): " + traceback);
+        } finally {
+            isolated.onShutdown(false);
+        }
+    }
+
+    @Test
+    public void fallsBackToSnippetIdWithoutExecutionCountAndOmitsLeadingDot() throws Exception {
+        RuntimeException thrown = assertThrows(
+                RuntimeException.class,
+                () -> kernel.getEvaluator().eval(
+                        kernel.getJShell(),
+                        "void directFail() {\n"
+                        + "    throw new IllegalArgumentException(\"x\");\n"
+                        + "}\n"
+                        + "directFail();"
+                )
+        );
+
+        List<String> plain = stripAnsi(kernel.formatError(thrown));
+        assertTrue(
+                plain.stream().anyMatch(l -> l.matches("\tat directFail\\(#\\d+:2\\)")),
+                "Expected method frame without leading dot using #id fallback: " + plain
+        );
+        assertTrue(
+                plain.stream().anyMatch(l -> l.matches("\tat \\(#\\d+:4\\)")),
+                "Expected top-level frame without leading dot using #id fallback: " + plain
+        );
+
+        EvalException synthetic = newEvalException(
+                "boom",
+                "java.lang.RuntimeException",
+                new StackTraceElement[]{
+                        new StackTraceElement("", "", "#99", 5),
+                        new StackTraceElement("", "topFn", "#98", 2),
+                        new StackTraceElement("Pkg.Clz", "m", "#97", 4),
+                        new StackTraceElement("java.lang.String", "valueOf", "String.java", 10)
+                },
+                null);
+        List<String> syntheticPlain = stripAnsi(kernel.formatError(synthetic));
+        assertEquals("\tat (#99:5)", syntheticPlain.get(1));
+        assertEquals("\tat topFn(#98:2)", syntheticPlain.get(2));
+        assertEquals("\tat Pkg.Clz.m(#97:4)", syntheticPlain.get(3));
+        assertEquals("\tat java.lang.String.valueOf(String.java:10)", syntheticPlain.get(4));
+    }
+
+    private static List<String> executeCell(JavaKernel targetKernel, String code) throws Exception {
+        CapturingEnv env = new CapturingEnv();
+        Method handleExecuteRequest = BaseKernel.class.getDeclaredMethod(
+                "handleExecuteRequest", ShellReplyEnvironment.class, Message.class);
+        handleExecuteRequest.setAccessible(true);
+        Message<ExecuteRequest> message = new Message<>(
+                null,
+                MessageType.EXECUTE_REQUEST,
+                new ExecuteRequest(code, false, false, Collections.emptyMap(), false, false));
+        handleExecuteRequest.invoke(targetKernel, env, message);
+        env.resolveDeferrals();
+
+        for (Message<?> msg : env.published) {
+            if (msg.getContent() instanceof PublishError) {
+                return stripAnsi(((PublishError) msg.getContent()).getStacktrace());
+            }
+        }
+        return List.of();
+    }
+
+    private static final class CapturingEnv extends ShellReplyEnvironment {
+        final List<Message<?>> published = new ArrayList<>();
+
+        CapturingEnv() {
+            super(null, null, null, null);
+        }
+
+        @Override
+        public void publish(Message<?> msg) {
+            published.add(msg);
+        }
+
+        @Override
+        public void reply(Message<?> msg) {
+        }
+
+        @Override
+        public ShellReplyEnvironment defer() {
+            return this;
+        }
     }
 }

@@ -16,6 +16,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -43,6 +45,7 @@ public class CodeEvaluator {
     private final TimeUnit timeoutUnit;
     private final JJavaLoaderDelegate loaderDelegate;
     private final JJavaExecutionControl execControl;
+    private final ConcurrentMap<String, SnippetLocation> snippetLocations = new ConcurrentHashMap<>();
 
     public CodeEvaluator(String name, long timeoutDuration, TimeUnit timeoutUnit) {
         this.name = name;
@@ -68,16 +71,33 @@ public class CodeEvaluator {
     }
 
     public Object eval(JShell shell, String code) {
+        return eval(shell, code, BaseKernel.NO_EXECUTION_COUNT);
+    }
+
+    /**
+     * Evaluates all complete snippets in {@code code} and records each snippet's execution count
+     * and 0-based starting line offset within {@code code}.
+     */
+    public Object eval(JShell shell, String code, int executionCount) {
 
         SourceCodeAnalysis sca = shell.sourceCodeAnalysis();
 
         Object lastResult = null;
-        SourceCodeAnalysis.CompletionInfo info = sca.analyzeCompletion(code);
+        String remaining = code;
+        int lineOffset = 0;
+        SourceCodeAnalysis.CompletionInfo info = sca.analyzeCompletion(remaining);
 
         while (info.completeness().isComplete()) {
+            String source = info.source();
+            String nextRemaining = info.remaining();
+            int snippetLineOffset = lineOffset + countLeadingWhitespaceNewlines(source);
 
-            lastResult = evalSingle(shell, info.source());
-            info = sca.analyzeCompletion(info.remaining());
+            lastResult = evalSingle(shell, source, executionCount, snippetLineOffset);
+
+            int consumedLength = Math.max(0, remaining.length() - nextRemaining.length());
+            lineOffset += countNewlines(remaining, consumedLength);
+            remaining = nextRemaining;
+            info = sca.analyzeCompletion(remaining);
         }
 
         if (info.completeness() != SourceCodeAnalysis.Completeness.EMPTY) {
@@ -88,8 +108,13 @@ public class CodeEvaluator {
     }
 
     protected Object evalSingle(JShell shell, String code) {
+        return evalSingle(shell, code, BaseKernel.NO_EXECUTION_COUNT, 0);
+    }
+
+    protected Object evalSingle(JShell shell, String code, int executionCount, int lineOffset) {
 
         List<SnippetEvent> events = shell.eval(code.strip());
+        recordSnippetLocations(events, executionCount, lineOffset);
 
         Object result = null;
 
@@ -252,12 +277,83 @@ public class CodeEvaluator {
         }
     }
 
+    /**
+     * Returns the recorded execution location for a JShell snippet ID (without leading {@code #}),
+     * or {@code null} if unknown.
+     */
+    public SnippetLocation getSnippetLocation(String snippetId) {
+        return snippetId == null ? null : snippetLocations.get(snippetId);
+    }
+
+    private void recordSnippetLocations(List<SnippetEvent> events, int executionCount, int lineOffset) {
+        for (SnippetEvent event : events) {
+            // Only update on the primary event; JShell reuses snippet IDs on redefinition, so
+            // intentionally do not remove entries when a snippet becomes OVERWRITTEN.
+            if (event.causeSnippet() == null && event.status() != Snippet.Status.OVERWRITTEN) {
+                String id = event.snippet().id();
+                if (id != null) {
+                    snippetLocations.put(id, new SnippetLocation(executionCount, lineOffset));
+                }
+            }
+        }
+    }
+
+    private static int countLeadingWhitespaceNewlines(String source) {
+        int i = 0;
+        int len = source.length();
+        while (i < len) {
+            int cp = source.codePointAt(i);
+            if (!Character.isWhitespace(cp)) {
+                break;
+            }
+            i += Character.charCount(cp);
+        }
+        return countNewlines(source, i);
+    }
+
+    private static int countNewlines(String s, int end) {
+        int count = 0;
+        for (int i = 0; i < end; i++) {
+            char c = s.charAt(i);
+            if (c == '\n') {
+                count++;
+            } else if (c == '\r') {
+                count++;
+                if (i + 1 < end && s.charAt(i + 1) == '\n') {
+                    i++;
+                }
+            }
+        }
+        return count;
+    }
+
     public void interrupt() {
         execControl.interrupt();
     }
 
     public ClassLoader getClassLoader() {
         return loaderDelegate.getClassLoader();
+    }
+
+    /**
+     * Captures the notebook execution context and 0-based starting line offset of an evaluated snippet.
+     */
+    public static final class SnippetLocation {
+        private final int executionCount;
+        private final int lineOffset;
+
+        public SnippetLocation(int executionCount, int lineOffset) {
+            this.executionCount = executionCount;
+            this.lineOffset = lineOffset;
+        }
+
+        public int getExecutionCount() {
+            return executionCount;
+        }
+
+        public int getLineOffset() {
+            return lineOffset;
+        }
     }
 
     static final class SimpleExecControlProvider implements ExecutionControlProvider {

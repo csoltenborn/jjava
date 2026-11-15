@@ -87,10 +87,13 @@ public abstract class BaseKernel {
     protected final Renderer renderer;
     protected final MagicsResolver magicsResolver;
     protected final MagicsRegistry magicsRegistry;
+    public static final int NO_EXECUTION_COUNT = -1;
+
     protected final Map<String, Extension> extensions;
     protected final boolean extensionsEnabled;
     protected final StringStyler errorStyler;
     protected final AtomicInteger executionCount;
+    protected int currentExecutionCount = NO_EXECUTION_COUNT;
 
     /**
      * Returns a non-null instance of the kernel associated with the current notebook. Throws an exception if called
@@ -399,6 +402,14 @@ public abstract class BaseKernel {
         });
     }
 
+    /**
+     * Returns the execution count of the request currently being evaluated or formatted, or
+     * {@link #NO_EXECUTION_COUNT} when called outside an execute request.
+     */
+    public int getCurrentExecutionCount() {
+        return currentExecutionCount;
+    }
+
     protected synchronized void handleExecuteRequest(ShellReplyEnvironment env, Message<ExecuteRequest> executeRequestMessage) {
         commManager.setMessageContext(executeRequestMessage);
 
@@ -416,6 +427,8 @@ public abstract class BaseKernel {
 
         this.io.setJupyterInEnabled(request.isStdinEnabled());
 
+        int previousExecutionCount = this.currentExecutionCount;
+        this.currentExecutionCount = count;
         try {
             DisplayData out = evalBuilder(request.getCode()).resolveMagics().renderResults().eval();
 
@@ -433,6 +446,8 @@ public abstract class BaseKernel {
             error.setExecutionCount(count);
             env.publish(PublishError.of(e, this::formatError));
             env.defer().replyError(ExecuteReply.MESSAGE_TYPE.error(), error);
+        } finally {
+            this.currentExecutionCount = previousExecutionCount;
         }
     }
 

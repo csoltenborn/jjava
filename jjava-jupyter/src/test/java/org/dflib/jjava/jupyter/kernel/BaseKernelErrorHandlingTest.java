@@ -46,6 +46,71 @@ public class BaseKernelErrorHandlingTest {
         assertErrorHandled(new RuntimeException("boom"), "RuntimeException");
     }
 
+    @Test
+    public void tracksCurrentExecutionCountDuringEvalAndErrorFormatting() {
+        List<Integer> observedEvalCounts = new ArrayList<>();
+        List<Integer> observedErrorFormatCounts = new ArrayList<>();
+
+        BaseKernel kernel = new BaseKernel(
+                "test", "0",
+                new LanguageInfo.Builder("test").build(),
+                Collections.emptyList(),
+                null,
+                new JupyterIO(StandardCharsets.UTF_8),
+                new CommManager(),
+                new Renderer(),
+                new MagicsResolver("%", "%%", new MagicTranspiler()),
+                new MagicsRegistry(),
+                false,
+                new StringStyler.Builder().build()) {
+            @Override
+            protected Object doEval(String source) {
+                observedEvalCounts.add(getCurrentExecutionCount());
+                if ("fail".equals(source)) {
+                    throw new RuntimeException("boom");
+                }
+                return null;
+            }
+
+            @Override
+            protected List<String> formatError(Throwable e) {
+                observedErrorFormatCounts.add(getCurrentExecutionCount());
+                return super.formatError(e);
+            }
+
+            @Override
+            public DisplayData inspect(String code, int at, boolean extraDetail) {
+                return null;
+            }
+
+            @Override
+            public ReplacementOptions complete(String code, int at) {
+                return null;
+            }
+
+            @Override
+            public String isComplete(String code) {
+                return IS_COMPLETE_MAYBE;
+            }
+        };
+
+        assertEquals(BaseKernel.NO_EXECUTION_COUNT, kernel.getCurrentExecutionCount());
+
+        CapturingEnv env = new CapturingEnv();
+        kernel.handleExecuteRequest(env, new Message<>(null, MessageType.EXECUTE_REQUEST,
+                new ExecuteRequest("ok", false, false, Collections.emptyMap(), false, false)));
+        env.resolveDeferrals();
+        assertEquals(BaseKernel.NO_EXECUTION_COUNT, kernel.getCurrentExecutionCount());
+
+        kernel.handleExecuteRequest(env, new Message<>(null, MessageType.EXECUTE_REQUEST,
+                new ExecuteRequest("fail", false, false, Collections.emptyMap(), false, false)));
+        env.resolveDeferrals();
+        assertEquals(BaseKernel.NO_EXECUTION_COUNT, kernel.getCurrentExecutionCount());
+
+        assertEquals(List.of(1, 2), observedEvalCounts);
+        assertEquals(List.of(2), observedErrorFormatCounts);
+    }
+
     private void assertErrorHandled(Throwable thrown, String expectedName) {
         ThrowingKernel kernel = new ThrowingKernel(thrown);
         CapturingEnv env = new CapturingEnv();
